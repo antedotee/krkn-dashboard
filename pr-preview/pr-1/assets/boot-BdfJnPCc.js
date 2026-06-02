@@ -1,0 +1,1 @@
+import{G as t,e as s,f as c,a as i,b as p,g as e,c as h,s as n}from"./index-DenogkLm.js";function f(a){a.dispatch({type:t,payload:!0}),a.dispatch(s(n)),a.dispatch(c()),a.dispatch(i()),a.dispatch(p()),a.dispatch(e()),a.dispatch(h())}export{f as bootPreview};
