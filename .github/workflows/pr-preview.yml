@@ -1,0 +1,138 @@
+name: PR UI Preview
+
+# Builds a static, seeded preview of the dashboard UI for each pull request and
+# deploys it to GitHub Pages under a per-PR path, then comments the link.
+#
+# The preview runs the frontend with VITE_PREVIEW_MODE=true: all API/socket
+# calls are answered from in-app seed fixtures, so every page and chart renders
+# without a backend. It is for reviewing UI changes only.
+#
+# NOTE: this only runs for PRs whose branch lives in THIS repository. Pull
+# requests from forks get a read-only token that cannot push to gh-pages, so
+# they are intentionally skipped (no preview is posted for fork PRs).
+
+concurrency: preview-${{ github.ref }}
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - closed
+
+permissions:
+  contents: write # push the built preview to the gh-pages branch
+  pull-requests: write # post/update the preview comment
+
+jobs:
+  preview:
+    # Skip fork PRs (their token can't deploy to gh-pages).
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Detect backend (server) changes
+        id: backend
+        if: github.event.action != 'closed'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+            const touchesBackend = files.some((f) =>
+              f.filename.startsWith("server/")
+            );
+            core.setOutput("changed", touchesBackend ? "true" : "false");
+
+      - name: Setup Node
+        if: github.event.action != 'closed'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Build preview bundle
+        if: github.event.action != 'closed'
+        env:
+          VITE_PREVIEW_MODE: "true"
+          # Per-PR GitHub Pages sub-path. Derived from the repo name so this
+          # works unchanged on a fork or on the upstream repo.
+          VITE_BASE_PATH: "/${{ github.event.repository.name }}/pr-preview/pr-${{ github.event.number }}/"
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy / remove preview
+        uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1.8.1
+        with:
+          source-dir: ./dist/
+          preview-branch: gh-pages
+          umbrella-dir: pr-preview
+          comment: false # we post our own combined comment below
+
+      - name: Comment preview link
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const owner = context.repo.owner.toLowerCase();
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request.number;
+            const url = `https://${owner}.github.io/${repo}/pr-preview/pr-${pr}/`;
+            const marker = "<!-- pr-ui-preview -->";
+            const closed = context.payload.action === "closed";
+            const backendChanged = "${{ steps.backend.outputs.changed }}" === "true";
+
+            let body;
+            if (closed) {
+              body =
+                `${marker}\n## 🔎 UI Preview\n\n` +
+                `The preview for this PR has been removed because the PR is closed.`;
+            } else {
+              body =
+                `${marker}\n## 🔎 UI Preview\n\n` +
+                `A live, seeded preview of this PR's UI is deployed (no backend — ` +
+                `synthetic demo data so every page and chart renders):\n\n` +
+                `**👉 ${url}**\n\n` +
+                `<sub>Preview mode serves all API/socket calls from in-app fixtures. ` +
+                `It is for reviewing UI changes only and is not connected to a real backend.</sub>`;
+              if (backendChanged) {
+                body +=
+                  `\n\n---\n` +
+                  `⚠️ **This PR also contains backend changes** (\`server/**\`). ` +
+                  `The preview reflects the UI only — backend behavior is not exercised. ` +
+                  `To properly test those changes, run the app locally:\n\n` +
+                  "```bash\nnpm install && npm run dev\n```";
+              }
+            }
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo,
+              issue_number: pr,
+              per_page: 100,
+            });
+            const existing = comments.find(
+              (c) => c.body && c.body.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo,
+                issue_number: pr,
+                body,
+              });
+            }

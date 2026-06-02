@@ -2,8 +2,10 @@ import "./App.css";
 
 import * as APP_ROUTES from "./utils/routeConstants";
 
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, HashRouter, Route, Routes } from "react-router-dom";
 import React, { useEffect } from "react";
+
+import { IS_PREVIEW } from "@/preview/flag";
 
 import Login from "@/components/Login";
 import MainLayout from "@/container/MainLayout";
@@ -49,12 +51,18 @@ function AppRoutes() {
   );
 }
 
+// GitHub Pages serves the preview from a per-PR sub-path and has no SPA
+// fallback for deep links. HashRouter keeps all routing client-side, so the
+// preview works at any sub-path without server rewrites. Real builds keep
+// BrowserRouter and clean URLs.
+const Router = IS_PREVIEW ? HashRouter : BrowserRouter;
+
 function App() {
   return (
     <div className="App">
-      <BrowserRouter>
+      <Router>
         <AppRoutes />
-      </BrowserRouter>
+      </Router>
     </div>
   );
 }
