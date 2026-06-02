@@ -8,7 +8,7 @@ import { useDispatch, useSelector } from "react-redux";
 import NewExperiment from "@/components/NewExperiment";
 import RunningContainersTable from "@/components/Overview/RunningContainersTable";
 import ScenariosCard from "@/components/template/ScenariosCard";
-import socketIOClient from "socket.io-client";
+import { createSocket } from "@/utils/createSocket";
 import { useInterval } from "@/utils/hooks";
 
 const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -33,7 +33,7 @@ const Overview = () => {
   );
 
   useEffect(() => {
-    const socketInstance = socketIOClient.io(
+    const socketInstance = createSocket(
       `${wsProtocol}://${wsHost}:${wsPort}`,
       {
         reconnection: true,
